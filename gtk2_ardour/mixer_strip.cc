@@ -2484,6 +2484,14 @@ MixerStrip::vca_menu_toggle (CheckMenuItem* menuitem, uint32_t n)
 		return;
 	}
 
+	if (!_selected) {
+		/* if this strip is not selected, add it before carrying out
+		   changes to assignment. the user probably didn't notice
+		   that they were clicking on an unselected track.
+		*/
+		_mixer.select_strip (*this);
+	}
+
 	if (!menuitem->get_active()) {
 		cerr << "Unassign from " << n << endl;
 		_mixer.do_vca_unassign (vca);
@@ -2499,8 +2507,8 @@ MixerStrip::vca_assign (boost::shared_ptr<VCA> vca)
 	if (!vca || !_route) {
 		return;
 	}
-
-	vca->add (_route);
+	cerr << "Adding " << _route->name() << " to " << vca->number() << endl;
+	_route->gain_control()->add_master (vca);
 }
 
 void
@@ -2512,9 +2520,11 @@ MixerStrip::vca_unassign (boost::shared_ptr<VCA> vca)
 
 	if (!vca) {
 		/* null VCA means drop all VCA assignments */
+		cerr << "clear vcas for " << _route->name() << endl;
 		_route->gain_control()->clear_masters ();
 	} else {
-		vca->remove (_route);
+		cerr << "Removing " << _route->name() << " from " << vca->number() << endl;
+		_route->gain_control()->remove_master (vca);
 	}
 }
 

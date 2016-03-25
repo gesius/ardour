@@ -685,7 +685,7 @@ Editor::button_press_handler_1 (ArdourCanvas::Item* item, GdkEvent* event, ItemT
 			new TempoMarkerDrag (
 				this,
 				item,
-				Keyboard::modifier_state_contains (event->button.state, Keyboard::CopyModifier)
+				Keyboard::modifier_state_equals (event->button.state, Keyboard::CopyModifier)
 				),
 			event
 			);

@@ -2041,7 +2041,7 @@ TempoMap::solve_map (Metrics& imaginary, TempoSection* section, const Tempo& bpm
 			}
 		}
 	}
-	if (section->movable() && frame < first_m_frame) {
+	if (section->movable() && frame <= first_m_frame) {
 		return false;
 	} else {
 		section->set_active (true);

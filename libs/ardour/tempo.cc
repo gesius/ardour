@@ -73,7 +73,10 @@ Meter::frames_per_bar (const Tempo& tempo, framecnt_t sr) const
 const string TempoSection::xml_state_node_name = "Tempo";
 
 TempoSection::TempoSection (const XMLNode& node)
-	: MetricSection (0.0), Tempo (TempoMap::default_tempo())
+	: MetricSection (0.0)
+	, Tempo (TempoMap::default_tempo())
+	, _c_func (0.0)
+	, _active (true)
 {
 
 	const XMLProperty *prop;
@@ -146,15 +149,6 @@ TempoSection::TempoSection (const XMLNode& node)
 		set_active (string_is_affirmative (prop->value()));
 	}
 
-	if ((prop = node.property ("bar-offset")) == 0) {
-		_bar_offset = -1.0;
-	} else {
-		if (sscanf (prop->value().c_str(), "%lf", &_bar_offset) != 1 || _bar_offset < 0.0) {
-			error << _("TempoSection XML node has an illegal \"bar-offset\" value") << endmsg;
-			throw failed_constructor();
-		}
-	}
-
 	if ((prop = node.property ("tempo-type")) == 0) {
 		_type = Constant;
 	} else {
@@ -183,8 +177,6 @@ TempoSection::get_state() const
 	root->add_property ("beats-per-minute", buf);
 	snprintf (buf, sizeof (buf), "%f", _note_type);
 	root->add_property ("note-type", buf);
-	// snprintf (buf, sizeof (buf), "%f", _bar_offset);
-	// root->add_property ("bar-offset", buf);
 	snprintf (buf, sizeof (buf), "%s", movable()?"yes":"no");
 	root->add_property ("movable", buf);
 	snprintf (buf, sizeof (buf), "%s", active()?"yes":"no");
@@ -193,16 +185,6 @@ TempoSection::get_state() const
 	root->add_property ("lock-style", enum_2_string (position_lock_style()));
 
 	return *root;
-}
-
-void
-
-TempoSection::update_bar_offset_from_bbt (const Meter& m)
-{
-	_bar_offset = (pulse() * BBT_Time::ticks_per_beat) /
-		(m.divisions_per_bar() * BBT_Time::ticks_per_beat);
-
-	DEBUG_TRACE (DEBUG::TempoMath, string_compose ("Tempo set bar offset to %1 from %2 w/%3\n", _bar_offset, pulse(), m.divisions_per_bar()));
 }
 
 void
@@ -371,7 +353,7 @@ double
 TempoSection::compute_c_func_pulse (const double& end_bpm, const double& end_pulse, const framecnt_t& frame_rate)
 {
 	double const log_tempo_ratio = log (end_bpm / pulses_per_minute());
-	return pulses_per_minute() *  (exp (log_tempo_ratio) - 1) / (end_pulse - pulse());
+	return pulses_per_minute() *  (expm1 (log_tempo_ratio)) / (end_pulse - pulse());
 }
 
 /* compute the function constant from some later tempo section, given tempo (whole pulses/min.) and distance (in frames) from session origin */
@@ -439,36 +421,14 @@ TempoSection::pulse_tempo_at_pulse (const double& pulse) const
 double
 TempoSection::pulse_at_time (const double& time) const
 {
-	return ((exp (_c_func * time)) - 1) * (pulses_per_minute() / _c_func);
+	return expm1 (_c_func * time) * (pulses_per_minute() / _c_func);
 }
 
 /* time in minutes at pulse */
 double
 TempoSection::time_at_pulse (const double& pulse) const
 {
-	return log (((_c_func * pulse) / pulses_per_minute()) + 1) / _c_func;
-}
-
-
-void
-TempoSection::update_bbt_time_from_bar_offset (const Meter& meter)
-{
-	double new_beat;
-
-	if (_bar_offset < 0.0) {
-		/* not set yet */
-		return;
-	}
-
-	new_beat = pulse();
-
-	double ticks = BBT_Time::ticks_per_beat * meter.divisions_per_bar() * _bar_offset;
-	new_beat = ticks / BBT_Time::ticks_per_beat;
-
-	DEBUG_TRACE (DEBUG::TempoMath, string_compose ("from bar offset %1 and dpb %2, ticks = %3->%4 beats = %5\n",
-						       _bar_offset, meter.divisions_per_bar(), ticks, new_beat, new_beat));
-
-	set_pulse (new_beat);
+	return log1p ((_c_func * pulse) / pulses_per_minute()) / _c_func;
 }
 
 /***********************************************************************/
@@ -2025,7 +1985,7 @@ TempoMap::check_solved (Metrics& metrics, bool by_frame)
 					return false;
 				}
 				/* precision check ensures pulses and frames align independent of lock style.*/
-				if (t->frame() != prev_ts->frame_at_pulse (t->pulse(), _frame_rate)) {
+				if (by_frame && t->frame() != prev_ts->frame_at_pulse (t->pulse(), _frame_rate)) {
 					return false;
 				}
 			}
@@ -2810,7 +2770,6 @@ TempoMap::set_state (const XMLNode& node, int /*version*/)
 		XMLNodeList nlist;
 		XMLNodeConstIterator niter;
 		Metrics old_metrics (_metrics);
-		MeterSection* last_meter = 0;
 		_metrics.clear();
 
 		nlist = node.children();
@@ -2823,12 +2782,6 @@ TempoMap::set_state (const XMLNode& node, int /*version*/)
 				try {
 					TempoSection* ts = new TempoSection (*child);
 					_metrics.push_back (ts);
-
-					if (ts->bar_offset() < 0.0) {
-						if (last_meter) {
-							//ts->update_bar_offset_from_bbt (*last_meter);
-						}
-					}
 				}
 
 				catch (failed_constructor& err){
@@ -2842,7 +2795,6 @@ TempoMap::set_state (const XMLNode& node, int /*version*/)
 				try {
 					MeterSection* ms = new MeterSection (*child);
 					_metrics.push_back (ms);
-					last_meter = ms;
 				}
 
 				catch (failed_constructor& err) {
@@ -2930,7 +2882,7 @@ TempoMap::dump (const Metrics& metrics, std::ostream& o) const
 	for (Metrics::const_iterator i = metrics.begin(); i != metrics.end(); ++i) {
 
 		if ((t = dynamic_cast<const TempoSection*>(*i)) != 0) {
-			o << "Tempo @ " << *i << " (Bar-offset: " << t->bar_offset() << ") " << t->beats_per_minute() << " BPM (pulse = 1/" << t->note_type() << ") at " << t->pulse() << " frame= " << t->frame() << " (movable? "
+			o << "Tempo @ " << *i << t->beats_per_minute() << " BPM (pulse = 1/" << t->note_type() << ") at " << t->pulse() << " frame= " << t->frame() << " (movable? "
 			  << t->movable() << ')' << " pos lock: " << enum_2_string (t->position_lock_style()) << std::endl;
 			o << "current      : " << t->beats_per_minute() << " | " << t->pulse() << " | " << t->frame() << std::endl;
 			if (prev_ts) {
@@ -3240,7 +3192,7 @@ operator<< (std::ostream& o, const MetricSection& section) {
 	if ((ts = dynamic_cast<const TempoSection*> (&section)) != 0) {
 		o << *((const Tempo*) ts);
 	} else if ((ms = dynamic_cast<const MeterSection*> (&section)) != 0) {
-		//o << *((const Meter*) ms);
+		o << *((const Meter*) ms);
 	}
 
 	return o;

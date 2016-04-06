@@ -2907,6 +2907,18 @@ TempoMap::set_state (const XMLNode& node, int /*version*/)
 			_metrics.sort (cmp);
 		}
 
+		/* check for legacy sessions where bbt was the base musical unit for tempo */
+		for (Metrics::const_iterator i = _metrics.begin(); i != _metrics.end(); ++i) {
+			TempoSection* t;
+			if ((t = dynamic_cast<TempoSection*> (*i)) != 0) {
+				if (t->legacy_bbt().bars != 0) {
+					fix_legacy_session();
+					break;
+				}
+				break;
+			}
+		}
+
 		/* check for multiple tempo/meters at the same location, which
 		   ardour2 somehow allowed.
 		*/
@@ -2933,18 +2945,6 @@ TempoMap::set_state (const XMLNode& node, int /*version*/)
 				}
 			}
 			prev = i;
-		}
-
-		/* check for legacy sessions where bbt was the base musical unit for tempo */
-		for (Metrics::const_iterator i = _metrics.begin(); i != _metrics.end(); ++i) {
-			TempoSection* t;
-			if ((t = dynamic_cast<TempoSection*> (*i)) != 0) {
-				if (t->legacy_bbt().bars != 0) {
-					fix_legacy_session();
-					break;
-				}
-				break;
-			}
 		}
 
 		recompute_map (_metrics);

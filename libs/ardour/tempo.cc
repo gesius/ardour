@@ -1484,6 +1484,13 @@ TempoMap::pulse_at_frame_locked (const Metrics& metrics, const framecnt_t& frame
 	return pulses_in_section + prev_t->pulse();
 }
 
+double
+TempoMap::pulse_at_frame (const framecnt_t& frame) const
+{
+	Glib::Threads::RWLock::ReaderLock lm (lock);
+	return pulse_at_frame_locked (_metrics, frame);
+}
+
 framecnt_t
 TempoMap::frame_at_pulse_locked (const Metrics& metrics, const double& pulse) const
 {
@@ -1512,6 +1519,13 @@ TempoMap::frame_at_pulse_locked (const Metrics& metrics, const double& pulse) co
 	framecnt_t const ret = (framecnt_t) floor (dtime) + prev_t->frame();
 
 	return ret;
+}
+
+framecnt_t
+TempoMap::frame_at_pulse (const double& pulse) const
+{
+	Glib::Threads::RWLock::ReaderLock lm (lock);
+	return frame_at_pulse_locked (_metrics, pulse);
 }
 
 double
